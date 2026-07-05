@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PnL Coach — 선물 손익 코치</title>
+<style>
+:root{
+  --surface:#fcfcfb; --page:#f9f9f7; --ink:#0b0b0b; --ink2:#52514e;
+  --muted:#898781; --grid:#e1e0d9; --axis:#c3c2b7;
+  --profit:#2a78d6; --loss:#e34948; --neutral:#f0efec;
+  --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b;
+  --border:rgba(11,11,11,.10);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --surface:#1a1a19; --page:#0d0d0d; --ink:#ffffff; --ink2:#c3c2b7;
+    --muted:#898781; --grid:#2c2c2a; --axis:#383835;
+    --profit:#3987e5; --loss:#e66767; --neutral:#383835;
+    --border:rgba(255,255,255,.10);
+  }
+}
+*{box-sizing:border-box;margin:0}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--page);color:var(--ink);line-height:1.5}
+.wrap{max-width:1080px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:20px;margin-bottom:4px}
+h2{font-size:15px;margin:0 0 10px;color:var(--ink)}
+.sub{color:var(--muted);font-size:13px;margin-bottom:20px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input,select,button,textarea{font:inherit;padding:8px 10px;border:1px solid var(--axis);border-radius:8px;background:var(--surface);color:var(--ink)}
+button{cursor:pointer;background:var(--ink);color:var(--surface);border:none;font-weight:600}
+button.ghost{background:transparent;color:var(--ink);border:1px solid var(--axis);font-weight:400}
+button.ghost.active{background:var(--neutral);font-weight:600}
+button:disabled{opacity:.5;cursor:wait}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px}
+.tile{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+.tile .label{font-size:12px;color:var(--muted)}
+.tile .value{font-size:22px;font-weight:700;margin-top:2px}
+.tile .value.pos{color:var(--profit)} .tile .value.neg{color:var(--loss)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:right;padding:6px 8px;border-bottom:1px solid var(--grid);font-variant-numeric:tabular-nums}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--muted);font-weight:500}
+.pos{color:var(--profit)} .neg{color:var(--loss)}
+.badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;color:#fff;margin-right:8px;vertical-align:middle}
+.badge.good{background:var(--good)} .badge.warning{background:var(--warning);color:#0b0b0b}
+.badge.serious{background:var(--serious);color:#0b0b0b} .badge.critical{background:var(--critical)} .badge.info{background:var(--muted)}
+.finding{padding:10px 0;border-bottom:1px solid var(--grid)}
+.finding:last-child{border-bottom:none}
+.finding .t{font-weight:600;font-size:14px}
+.finding .d{font-size:13px;color:var(--ink2);margin-top:2px}
+.chartbox{overflow-x:auto}
+svg{display:block}
+#tooltip{position:fixed;pointer-events:none;background:var(--ink);color:var(--surface);font-size:12px;padding:6px 9px;border-radius:6px;display:none;z-index:10;white-space:nowrap}
+.advice-content{white-space:pre-wrap;font-size:14px;background:var(--neutral);border-radius:8px;padding:14px;margin-top:10px}
+.msg{font-size:13px;margin-top:8px;color:var(--serious)}
+.keylist li{font-size:13px;padding:4px 0;list-style:none}
+.keylist button{padding:2px 8px;font-size:12px}
+details summary{cursor:pointer;color:var(--muted);font-size:13px;margin-bottom:8px}
+.hidden{display:none}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:760px){.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📈 PnL Coach</h1>
+  <div class="sub">멀티거래소 선물 손익 분석 + AI 코칭 — 키는 서버에 암호화 저장, 조회 전용으로만 사용</div>
+
+  <!-- ===== 로그인 ===== -->
+  <div id="view-auth" class="card hidden">
+    <h2>로그인 / 가입</h2>
+    <div class="row">
+      <input id="auth-user" placeholder="아이디" autocomplete="username">
+      <input id="auth-pass" type="password" placeholder="비밀번호 (6자+)" autocomplete="current-password">
+      <button onclick="doLogin()">로그인</button>
+      <button class="ghost" onclick="doRegister()">가입</button>
+    </div>
+    <div id="auth-msg" class="msg"></div>
+  </div>
+
+  <!-- ===== 대시보드 ===== -->
+  <div id="view-app" class="hidden">
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div class="row">
+          <button class="ghost period active" data-p="30d">30일</button>
+          <button class="ghost period" data-p="90d">90일</button>
+          <button class="ghost period" data-p="all">전체</button>
+        </div>
+        <div class="row">
+          <button id="btn-sync" onclick="doSync()">지금 동기화</button>
+          <span id="me" style="font-size:13px;color:var(--muted)"></span>
+          <button class="ghost" onclick="doLogout()">로그아웃</button>
+        </div>
+      </div>
+      <div id="sync-msg" class="msg"></div>
+    </div>
+
+    <div class="tiles" id="tiles"></div>
+
+    <div class="grid2">
+      <div class="card chartbox">
+        <h2>월별 순실현 (USDT)</h2>
+        <div id="chart-monthly"></div>
+        <details><summary>표로 보기</summary><table id="tbl-monthly"></table></details>
+      </div>
+      <div class="card chartbox">
+        <h2>누적 실현손익</h2>
+        <div id="chart-curve"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>습관 진단</h2>
+      <div id="findings"></div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">AI 코칭</h2>
+        <button id="btn-advice" onclick="doAdvice()">조언 생성</button>
+      </div>
+      <div id="advice-msg" class="msg"></div>
+      <div id="advice-out"></div>
+      <details style="margin-top:10px"><summary>지난 조언</summary><div id="advice-history"></div></details>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <h2>심볼별 성과 (하위)</h2>
+        <table id="tbl-losers"></table>
+      </div>
+      <div class="card">
+        <h2>심볼별 성과 (상위)</h2>
+        <table id="tbl-winners"></table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>설정 — 거래소 키</h2>
+      <div class="row">
+        <select id="k-exchange" onchange="togglePassphrase()">
+          <option value="mexc">MEXC</option><option value="binance">Binance</option>
+          <option value="bybit">Bybit</option><option value="bitget">Bitget</option>
+          <option value="gate">Gate</option>
+        </select>
+        <input id="k-key" placeholder="API Key" style="min-width:200px">
+        <input id="k-secret" type="password" placeholder="Secret" style="min-width:200px">
+        <input id="k-pass" type="password" placeholder="Passphrase" class="hidden" style="min-width:140px">
+        <button onclick="addKey()">등록</button>
+      </div>
+      <div class="msg" style="color:var(--muted)">⚠️ 반드시 읽기 전용(거래·출금 권한 OFF) 키만 등록하세요.</div>
+      <ul class="keylist" id="key-list"></ul>
+
+      <h2 style="margin-top:16px">설정 — AI 토큰 (본인 것)</h2>
+      <div class="row">
+        <select id="l-provider"><option value="anthropic">Claude (Anthropic)</option><option value="openai">OpenAI</option></select>
+        <input id="l-key" type="password" placeholder="API 키 또는 구독 토큰(sk-ant-oat…)" style="min-width:240px">
+        <input id="l-model" placeholder="모델 (비우면 기본값)" style="min-width:160px">
+        <button onclick="addLlm()">저장</button>
+      </div>
+      <div class="msg" style="color:var(--muted)">
+        💳 Claude Pro/Max 구독자: 터미널에서 <code>claude setup-token</code> 실행 →
+        나온 <code>sk-ant-oat…</code> 토큰을 붙여넣으면 <b>API 비용 없이 구독 요금</b>으로 사용.
+        API 키(<code>sk-ant-api…</code>)는 종량 과금. ChatGPT Plus 구독은 API 미포함이라 OpenAI는 API 키만 가능.
+      </div>
+      <ul class="keylist" id="llm-list"></ul>
+    </div>
+  </div>
+</div>
+<div id="tooltip"></div>
+
+<script>
+let period = '30d';
+
+async function api(path, opts={}){
+  const r = await fetch(path, {credentials:'same-origin',
+    headers:{'Content-Type':'application/json'}, ...opts});
+  if(!r.ok){ const e = await r.json().catch(()=>({detail:r.statusText}));
+    throw new Error(e.detail || r.statusText); }
+  return r.json();
+}
+const $ = id => document.getElementById(id);
+const fmt = x => (x>=0?'+':'') + x.toLocaleString('en-US',{maximumFractionDigits:0});
+const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// ---------- auth ----------
+async function boot(){
+  try{ const me = await api('/api/me'); showApp(me.username); }
+  catch{ $('view-auth').classList.remove('hidden'); }
+}
+async function doLogin(){ authCall('/api/login'); }
+async function doRegister(){ authCall('/api/register'); }
+async function authCall(path){
+  try{
+    const me = await api(path,{method:'POST',body:JSON.stringify({
+      username:$('auth-user').value.trim(), password:$('auth-pass').value})});
+    showApp(me.username);
+  }catch(e){ $('auth-msg').textContent = e.message; }
+}
+async function doLogout(){ await api('/api/logout',{method:'POST'}); location.reload(); }
+function showApp(username){
+  $('view-auth').classList.add('hidden');
+  $('view-app').classList.remove('hidden');
+  $('me').textContent = username;
+  refreshKeys(); refreshStats(); refreshAdviceHistory();
+}
+
+// ---------- keys ----------
+function togglePassphrase(){
+  $('k-pass').classList.toggle('hidden', $('k-exchange').value !== 'bitget');
+}
+async function addKey(){
+  try{
+    await api('/api/exchange-keys',{method:'POST',body:JSON.stringify({
+      exchange:$('k-exchange').value, api_key:$('k-key').value.trim(),
+      secret:$('k-secret').value.trim(),
+      passphrase:$('k-pass').value.trim()||null})});
+    $('k-key').value=$('k-secret').value=$('k-pass').value='';
+    refreshKeys();
+  }catch(e){ alert(e.message); }
+}
+async function refreshKeys(){
+  const keys = await api('/api/exchange-keys');
+  $('key-list').innerHTML = keys.map(k =>
+    `<li><b>${k.exchange}</b> — ${k.api_key}
+     <button class="ghost" onclick="delKey('${k.exchange}')">삭제</button></li>`).join('')
+    || '<li style="color:var(--muted)">등록된 키 없음</li>';
+  const llm = await api('/api/llm-key');
+  $('llm-list').innerHTML = llm.map(k =>
+    `<li><b>${k.provider}</b> — ${k.key} ${k.model?'('+esc(k.model)+')':''}</li>`).join('');
+}
+async function delKey(ex){
+  if(!confirm(ex+' 키 삭제?')) return;
+  await api('/api/exchange-keys/'+ex,{method:'DELETE'}); refreshKeys();
+}
+async function addLlm(){
+  try{
+    await api('/api/llm-key',{method:'POST',body:JSON.stringify({
+      provider:$('l-provider').value, key:$('l-key').value.trim(),
+      model:$('l-model').value.trim()||null})});
+    $('l-key').value=''; refreshKeys();
+  }catch(e){ alert(e.message); }
+}
+
+// ---------- sync ----------
+async function doSync(){
+  const b=$('btn-sync'); b.disabled=true; b.textContent='동기화 중…';
+  try{
+    const res = await api('/api/sync',{method:'POST'});
+    $('sync-msg').textContent = res.map(r =>
+      r.ok ? `${r.exchange}: +${r.new_positions}건` : `${r.exchange}: 실패(${r.error})`).join(' · ');
+    $('sync-msg').style.color = res.every(r=>r.ok)?'var(--good)':'var(--serious)';
+    refreshStats();
+  }catch(e){ $('sync-msg').textContent = e.message; }
+  b.disabled=false; b.textContent='지금 동기화';
+}
+
+// ---------- stats ----------
+document.addEventListener('click', e=>{
+  if(e.target.classList.contains('period')){
+    document.querySelectorAll('.period').forEach(b=>b.classList.remove('active'));
+    e.target.classList.add('active'); period=e.target.dataset.p; refreshStats();
+  }
+});
+async function refreshStats(){
+  const {stats:s, findings} = await api('/api/stats?since='+period);
+  renderTiles(s); renderMonthly(s.monthly); renderCurve(s.curve);
+  renderSymbols(s.symbols); renderFindings(findings);
+}
+function renderTiles(s){
+  const t = [
+    ['순실현손익', fmt(s.net)+' USDT', s.net>=0?'pos':'neg'],
+    ['승률', s.win_rate+'%', ''],
+    ['Profit Factor', s.profit_factor ?? '∞', ''],
+    ['거래 수', s.n+'건', ''],
+    ['평균 익절/손절', `${fmt(s.avg_win)} / ${fmt(s.avg_loss)}`, ''],
+    ['수수료', fmt(-s.fees)+' USDT', 'neg'],
+    ['펀딩 손익', fmt(s.funding)+' USDT', s.funding>=0?'pos':'neg'],
+  ];
+  $('tiles').innerHTML = t.map(([l,v,c]) =>
+    `<div class="tile"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
+}
+
+// ---------- charts (SVG, no deps) ----------
+const tip = $('tooltip');
+function showTip(e, html){ tip.innerHTML=html; tip.style.display='block';
+  tip.style.left=(e.clientX+12)+'px'; tip.style.top=(e.clientY-10)+'px'; }
+function hideTip(){ tip.style.display='none'; }
+
+function renderMonthly(monthly){
+  const el = $('chart-monthly');
+  if(!monthly.length){ el.innerHTML='<div class="msg">데이터 없음</div>'; return; }
+  const W=460,H=200,P=30, n=monthly.length;
+  const maxAbs = Math.max(...monthly.map(m=>Math.abs(m.net)),1);
+  const y0=H/2, scale=(H/2-P)/maxAbs, bw=Math.min(40,(W-2*P)/n-6);
+  let bars='';
+  monthly.forEach((m,i)=>{
+    const x=P+(W-2*P)*(i+0.5)/n - bw/2;
+    const h=Math.abs(m.net)*scale;
+    const y=m.net>=0? y0-h : y0+2;
+    const col=m.net>=0?'var(--profit)':'var(--loss)';
+    bars+=`<rect x="${x}" y="${m.net>=0?y:y0+2}" width="${bw}" height="${Math.max(h-2,1)}" rx="4"
+      fill="${col}" data-tip="${m.month}: ${fmt(m.net)} USDT"/>`;
+    bars+=`<text x="${x+bw/2}" y="${H-6}" text-anchor="middle" font-size="10" fill="var(--muted)">${m.month.slice(2)}</text>`;
+  });
+  el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%">
+    <line x1="${P}" x2="${W-P}" y1="${y0}" y2="${y0}" stroke="var(--axis)" stroke-width="1"/>
+    ${bars}</svg>`;
+  el.querySelectorAll('rect').forEach(r=>{
+    r.addEventListener('mousemove',e=>showTip(e,r.dataset.tip));
+    r.addEventListener('mouseleave',hideTip);
+  });
+  $('tbl-monthly').innerHTML='<tr><th>월</th><th>순실현</th></tr>'+monthly.map(m=>
+    `<tr><td>${m.month}</td><td class="${m.net>=0?'pos':'neg'}">${fmt(m.net)}</td></tr>`).join('');
+}
+
+function renderCurve(curve){
+  const el=$('chart-curve');
+  if(curve.length<2){ el.innerHTML='<div class="msg">데이터 없음</div>'; return; }
+  const W=460,H=200,P=30;
+  const vals=curve.map(c=>c.cum);
+  const min=Math.min(...vals,0), max=Math.max(...vals,0), range=max-min||1;
+  const X=i=>P+(W-2*P)*i/(curve.length-1);
+  const Y=v=>H-P-(H-2*P)*(v-min)/range;
+  const pts=curve.map((c,i)=>`${X(i)},${Y(c.cum)}`).join(' ');
+  const zeroY=Y(0);
+  el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" id="curve-svg">
+    <line x1="${P}" x2="${W-P}" y1="${zeroY}" y2="${zeroY}" stroke="var(--grid)" stroke-width="1"/>
+    <polyline points="${pts}" fill="none" stroke="var(--profit)" stroke-width="2"/>
+    <line id="xh" y1="${P}" y2="${H-P}" stroke="var(--axis)" stroke-width="1" visibility="hidden"/>
+    <circle id="xdot" r="4" fill="var(--profit)" stroke="var(--surface)" stroke-width="2" visibility="hidden"/>
+  </svg>`;
+  const svg=$('curve-svg'), xh=svg.querySelector('#xh'), dot=svg.querySelector('#xdot');
+  svg.addEventListener('mousemove',e=>{
+    const box=svg.getBoundingClientRect();
+    const fx=(e.clientX-box.left)/box.width*W;
+    const i=Math.max(0,Math.min(curve.length-1,Math.round((fx-P)/(W-2*P)*(curve.length-1))));
+    const c=curve[i];
+    xh.setAttribute('x1',X(i)); xh.setAttribute('x2',X(i)); xh.setAttribute('visibility','visible');
+    dot.setAttribute('cx',X(i)); dot.setAttribute('cy',Y(c.cum)); dot.setAttribute('visibility','visible');
+    showTip(e,`${c.date}<br>누적 ${fmt(c.cum)} USDT`);
+  });
+  svg.addEventListener('mouseleave',()=>{ hideTip();
+    xh.setAttribute('visibility','hidden'); dot.setAttribute('visibility','hidden'); });
+}
+
+function renderSymbols(symbols){
+  const head='<tr><th>심볼</th><th>순실현</th><th>건수</th><th>승률</th></tr>';
+  const rowOf=s=>`<tr><td>${esc(s.symbol)}</td><td class="${s.net>=0?'pos':'neg'}">${fmt(s.net)}</td>
+    <td>${s.count}</td><td>${s.count?Math.round(s.wins/s.count*100):0}%</td></tr>`;
+  $('tbl-losers').innerHTML = head + symbols.slice(0,10).map(rowOf).join('');
+  $('tbl-winners').innerHTML = head + symbols.slice(-10).reverse().map(rowOf).join('');
+}
+
+function renderFindings(findings){
+  $('findings').innerHTML = findings.map(f=>
+    `<div class="finding"><span class="badge ${f.severity}">${f.severity}</span>
+     <span class="t">${esc(f.title)}</span><div class="d">${esc(f.detail)}</div></div>`).join('');
+}
+
+// ---------- advice ----------
+async function doAdvice(){
+  const b=$('btn-advice'); b.disabled=true; b.textContent='생성 중… (수십 초)';
+  $('advice-msg').textContent='';
+  try{
+    const r = await api('/api/advice',{method:'POST',body:JSON.stringify({since:period})});
+    $('advice-out').innerHTML = `<div class="advice-content">${esc(r.content)}</div>`;
+    refreshAdviceHistory();
+  }catch(e){ $('advice-msg').textContent = e.message; }
+  b.disabled=false; b.textContent='조언 생성';
+}
+async function refreshAdviceHistory(){
+  const rows = await api('/api/advice');
+  $('advice-history').innerHTML = rows.map(r=>
+    `<div class="advice-content" style="margin-top:8px"><b>${new Date(r.created_at).toLocaleString('ko-KR')} · ${r.provider}</b>\n${esc(r.content)}</div>`).join('')
+    || '<div class="msg" style="color:var(--muted)">아직 없음</div>';
+}
+
+boot();
+</script>
+</body>
+</html>

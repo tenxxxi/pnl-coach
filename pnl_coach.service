@@ -1,0 +1,13 @@
+[Unit]
+Description=PnL Coach (multi-exchange futures PnL dashboard)
+After=network.target
+
+[Service]
+# %h = home directory. 프로젝트를 다른 경로에 뒀으면 수정.
+WorkingDirectory=%h/pnl_coach
+ExecStart=%h/pnl_coach/venv/bin/uvicorn app:app --host 0.0.0.0 --port 8777
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
