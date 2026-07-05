@@ -68,6 +68,17 @@ CREATE TABLE IF NOT EXISTS cashflows(
   time INTEGER NOT NULL,
   UNIQUE(user_id, exchange, ext_id)
 );
+CREATE TABLE IF NOT EXISTS transfers(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  exchange TEXT NOT NULL,
+  ext_id TEXT NOT NULL,
+  direction TEXT NOT NULL,          -- IN(현물→선물) | OUT(선물→현물)
+  currency TEXT,
+  amount REAL NOT NULL,
+  time INTEGER NOT NULL,
+  UNIQUE(user_id, exchange, ext_id)
+);
 CREATE TABLE IF NOT EXISTS sync_log(
   user_id INTEGER NOT NULL,
   exchange TEXT NOT NULL,
@@ -135,6 +146,22 @@ def upsert_cashflows(user_id: int, exchange: str, rows: list[dict]) -> int:
                VALUES (?,?,?,?,?,?,?)""",
             (user_id, exchange, str(r["ext_id"]), r["kind"], r.get("symbol"),
              float(r["amount"]), r["time"]),
+        )
+        new += cur.rowcount
+    db.commit()
+    return new
+
+
+def upsert_transfers(user_id: int, exchange: str, rows: list[dict]) -> int:
+    db = get_db()
+    new = 0
+    for r in rows:
+        cur = db.execute(
+            """INSERT OR IGNORE INTO transfers
+               (user_id, exchange, ext_id, direction, currency, amount, time)
+               VALUES (?,?,?,?,?,?,?)""",
+            (user_id, exchange, str(r["ext_id"]), r["direction"],
+             r.get("currency"), float(r["amount"]), r["time"]),
         )
         new += cur.rowcount
     db.commit()

@@ -100,6 +100,12 @@ details summary{cursor:pointer;color:var(--muted);font-size:13px;margin-bottom:8
 
     <div class="tiles" id="tiles"></div>
 
+    <div class="card">
+      <h2>자금 흐름 — 순수 매매손익 vs 현물 회수</h2>
+      <div class="tiles" id="flow-tiles" style="margin-bottom:8px"></div>
+      <div id="flow-summary" style="font-size:14px;color:var(--ink2)"></div>
+    </div>
+
     <div class="grid2">
       <div class="card chartbox">
         <h2>월별 순실현 (USDT)</h2>
@@ -267,7 +273,7 @@ document.addEventListener('click', e=>{
 });
 async function refreshStats(){
   const {stats:s, findings} = await api('/api/stats?since='+period);
-  renderTiles(s); renderMonthly(s.monthly); renderCurve(s.curve);
+  renderTiles(s); renderFlow(s); renderMonthly(s.monthly); renderCurve(s.curve);
   renderSymbols(s.symbols); renderFindings(findings);
 }
 function renderTiles(s){
@@ -282,6 +288,30 @@ function renderTiles(s){
   ];
   $('tiles').innerHTML = t.map(([l,v,c]) =>
     `<div class="tile"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
+}
+
+function renderFlow(s){
+  const x = s.transfers || {in:0,out:0,net:0,withdrawn_net:0,count:0,other_currency_count:0};
+  const tiles = [
+    ['선물지갑 입금', fmt(x.in)+' USDT', ''],
+    ['선물→현물 출금', fmt(-x.out)+' USDT', x.out>0?'neg':''],
+    ['현물 순회수', fmt(x.withdrawn_net)+' USDT', x.withdrawn_net>0?'pos':''],
+    ['선물지갑 잔류분', fmt(s.retained)+' USDT', s.retained>=0?'pos':'neg'],
+  ];
+  $('flow-tiles').innerHTML = tiles.map(([l,v,c]) =>
+    `<div class="tile"><div class="label">${l}</div><div class="value ${c}" style="font-size:18px">${v}</div></div>`).join('');
+  let msg;
+  if(!x.count){
+    msg = '이체 기록 없음 — 이 기간 순실현이 전부 선물지갑에 남아 있음.';
+  } else if(x.withdrawn_net > 0 && s.net > 0){
+    msg = `이 기간 매매로 ${fmt(s.net)} USDT 벌어서, 그중 ${fmt(x.withdrawn_net)} USDT를 현물로 회수 (회수율 ${Math.min(999,Math.round(x.withdrawn_net/s.net*100))}%). 선물지갑 증분 ${fmt(s.retained)} USDT.`;
+  } else if(x.withdrawn_net < 0){
+    msg = `이 기간 현물에서 ${fmt(-x.withdrawn_net)} USDT를 선물로 추가 투입. 매매 순실현은 ${fmt(s.net)} USDT.`;
+  } else {
+    msg = `매매 순실현 ${fmt(s.net)} USDT, 현물 순회수 ${fmt(x.withdrawn_net)} USDT.`;
+  }
+  if(x.other_currency_count) msg += ` (USDT 외 통화 이체 ${x.other_currency_count}건은 합산 제외)`;
+  $('flow-summary').textContent = msg;
 }
 
 // ---------- charts (SVG, no deps) ----------

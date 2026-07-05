@@ -63,8 +63,28 @@ def compute_stats(user_id: int, since_ms: int) -> dict:
     hold_l = [ (r["close_time"] - r["open_time"]) / 60000
                for r in losses if r["open_time"] ]
 
+    # 선물지갑 이체 (USDT 기준 + 기타 통화 건수)
+    xrows = get_db().execute(
+        """SELECT direction, currency, SUM(amount) s, COUNT(*) c FROM transfers
+           WHERE user_id=? AND time>=? GROUP BY direction, currency""",
+        (user_id, since_ms),
+    ).fetchall()
+    t_in = sum(r["s"] for r in xrows if r["direction"] == "IN" and r["currency"] == "USDT")
+    t_out = sum(r["s"] for r in xrows if r["direction"] == "OUT" and r["currency"] == "USDT")
+    t_other = sum(r["c"] for r in xrows if r["currency"] != "USDT")
+    transfers = {
+        "in": round(t_in, 2),
+        "out": round(t_out, 2),
+        "net": round(t_in - t_out, 2),
+        "withdrawn_net": round(t_out - t_in, 2),   # 현물로 순회수 (양수 = 뺀 게 많음)
+        "count": sum(r["c"] for r in xrows),
+        "other_currency_count": t_other,
+    }
+
     return {
         "n": len(rows),
+        "transfers": transfers,
+        "retained": round(net - (t_out - t_in), 2),  # 순실현 중 선물지갑에 남은 증분
         "net": round(net, 2),
         "fees": round(fees, 2),
         "funding": round(funding, 2),

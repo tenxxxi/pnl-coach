@@ -14,7 +14,8 @@ from pydantic import BaseModel
 
 import advisor
 import security
-from db import get_db, now_ms, set_sync_log, upsert_cashflows, upsert_positions
+from db import (get_db, now_ms, set_sync_log, upsert_cashflows,
+                upsert_positions, upsert_transfers)
 from exchanges import SUPPORTED, fetch_closed
 from stats import compute_stats, diagnose
 
@@ -189,7 +190,7 @@ def _sync_one(uid: int, exchange: str, key_enc: str, secret_enc: str,
               passphrase_enc: str | None) -> dict:
     since_ms = now_ms() - SYNC_LOOKBACK_DAYS * 86_400_000
     try:
-        positions, flows = fetch_closed(
+        positions, flows, transfers = fetch_closed(
             exchange,
             security.decrypt(key_enc),
             security.decrypt(secret_enc),
@@ -198,7 +199,9 @@ def _sync_one(uid: int, exchange: str, key_enc: str, secret_enc: str,
         )
         new_p = upsert_positions(uid, exchange, positions)
         new_f = upsert_cashflows(uid, exchange, flows)
-        set_sync_log(uid, exchange, "ok", f"+{new_p} positions, +{new_f} flows")
+        new_t = upsert_transfers(uid, exchange, transfers)
+        set_sync_log(uid, exchange, "ok",
+                     f"+{new_p} positions, +{new_f} flows, +{new_t} transfers")
         return {"exchange": exchange, "ok": True, "new_positions": new_p}
     except Exception as e:
         set_sync_log(uid, exchange, "error", str(e))

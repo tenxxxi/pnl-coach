@@ -66,6 +66,7 @@ class MexcDirect:
 
     def fetch(self, since_ms):
         hist = self._pull_all("/api/v1/private/position/list/history_positions")
+        xfers = self._pull_all("/api/v1/private/account/transfer_record")
         positions = []
         for h in hist:
             close_time = h.get("updateTime") or h["createTime"]
@@ -85,7 +86,18 @@ class MexcDirect:
                 "fee": float(h.get("totalFee") or 0),
                 "funding": float(h.get("holdFee") or 0),
             })
-        return positions, []  # 수수료·펀딩이 포지션에 포함 → cashflow 없음
+        transfers = []
+        for x in xfers:
+            if x.get("state") != "SUCCESS" or x["createTime"] < since_ms:
+                continue
+            transfers.append({
+                "ext_id": x.get("txid") or x["id"],
+                "direction": x["type"],          # IN | OUT
+                "currency": x.get("currency"),
+                "amount": float(x["amount"]),
+                "time": x["createTime"],
+            })
+        return positions, [], transfers  # 수수료·펀딩은 포지션에 포함
 
 
 # ---------------------------------------------------------------- ccxt 공통
@@ -146,7 +158,31 @@ class BinanceAdapter:
                     "kind": kind, "symbol": r.get("symbol"),
                     "amount": float(r["income"]), "time": int(r["time"]),
                 })
-        return positions, flows
+        transfers = []
+        try:
+            current = 1
+            while True:
+                res = self.ex.sapiGetFuturesTransfer({
+                    "startTime": since_ms, "size": 100, "current": current})
+                rows = res.get("rows") or []
+                for r in rows:
+                    t = int(r.get("type") or 0)
+                    if t not in (1, 2):   # 1=현물→USDⓈ-M, 2=USDⓈ-M→현물
+                        continue
+                    transfers.append({
+                        "ext_id": f"xfer-{r['tranId']}",
+                        "direction": "IN" if t == 1 else "OUT",
+                        "currency": r.get("asset"),
+                        "amount": float(r["amount"]),
+                        "time": int(r["timestamp"]),
+                    })
+                if len(rows) < 100:
+                    break
+                current += 1
+                time.sleep(0.3)
+        except Exception:
+            pass  # 이체내역 권한 없거나 미지원 — 손익 수집은 계속
+        return positions, flows, transfers
 
 
 # ---------------------------------------------------------------- Bybit
@@ -191,7 +227,37 @@ class BybitAdapter:
                     break
                 time.sleep(0.25)
             start = win_end + 1
-        return positions, []
+        transfers = []
+        try:
+            cursor = ""
+            while True:
+                params = {"limit": 50, "startTime": since_ms}
+                if cursor:
+                    params["cursor"] = cursor
+                res = self.ex.privateGetV5AssetTransferQueryInterTransferList(params)
+                result = res.get("result") or {}
+                for r in result.get("list") or []:
+                    if r.get("status") and r["status"] != "SUCCESS":
+                        continue
+                    fut = ("CONTRACT", "UNIFIED")
+                    to_fut = r.get("toAccountType") in fut
+                    from_fut = r.get("fromAccountType") in fut
+                    if to_fut == from_fut:   # 선물지갑 무관 or 내부이동
+                        continue
+                    transfers.append({
+                        "ext_id": r.get("transferId"),
+                        "direction": "IN" if to_fut else "OUT",
+                        "currency": r.get("coin"),
+                        "amount": float(r["amount"]),
+                        "time": int(r["timestamp"]),
+                    })
+                cursor = result.get("nextPageCursor") or ""
+                if not cursor:
+                    break
+                time.sleep(0.25)
+        except Exception:
+            pass
+        return positions, [], transfers
 
 
 # ---------------------------------------------------------------- Bitget
@@ -233,7 +299,7 @@ class BitgetAdapter:
                 break
             id_less = end_id
             time.sleep(0.25)
-        return positions, []
+        return positions, [], []
 
 
 # ---------------------------------------------------------------- Gate
@@ -275,7 +341,7 @@ class GateAdapter:
                 break
             offset += len(rows)
             time.sleep(0.25)
-        return positions, []
+        return positions, [], []
 
 
 ADAPTERS = {
@@ -289,6 +355,6 @@ ADAPTERS = {
 
 def fetch_closed(exchange: str, key: str, secret: str, passphrase: str | None,
                  since_ms: int):
-    """(positions, cashflows) 리턴. exchange ∈ SUPPORTED."""
+    """(positions, cashflows, transfers) 리턴. exchange ∈ SUPPORTED."""
     adapter = ADAPTERS[exchange](key, secret, passphrase)
     return adapter.fetch(since_ms)
